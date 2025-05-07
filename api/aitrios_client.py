@@ -213,3 +213,167 @@ class AITRIOSClient:
             return response.json()
         else:
             raise Exception(f"Failed to stop inference: {response.status_code} - {response.text}")
+    # パラメーターファイル一覧を取得するメソッドを追加
+
+    def get_command_parameter_files(self):
+        """
+        Consoleに登録されているコマンドパラメーターファイル一覧を取得
+        
+        Returns:
+            Dict[str, Any]: ファイル一覧とバインド情報
+        """
+        headers = {
+            "Authorization": f"Bearer {self.get_access_token()}",
+            "Content-Type": "application/json"
+        }
+        url = f"{BASE_URL}/command_parameter_files"
+        
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            response_text = response.text
+            raise Exception(f"Failed to get command parameter files: {response.status_code} - {response_text}")
+    
+    def unbind_command_parameter_file(self, file_name, device_ids):
+        """
+        デバイスからコマンドパラメーターファイルをアンバインド
+        
+        Args:
+            file_name (str): アンバインドするコマンドパラメーターファイル名
+            device_ids (list): アンバインド対象のデバイスIDリスト
+        
+        Returns:
+            Dict[str, Any]: API応答
+        """
+        if not device_ids:
+            print(f"No device IDs provided for unbinding from {file_name}")
+            return {"result": "SUCCESS", "message": "No devices to unbind"}
+            
+        token = self.get_access_token()
+        
+        # 正しいエンドポイントとURLを使用
+        url = f"{BASE_URL}/devices/configuration/command_parameter_files/{file_name}"
+        
+        # API仕様に基づいた正しいデータ形式（カンマ区切りの文字列）
+        device_ids_str = ",".join(device_ids)
+        data = {
+            "device_ids": device_ids_str
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        print(f"Unbinding command parameter file {file_name} from devices: {device_ids}")
+        
+        try:
+            # DELETEメソッドでJSONデータを送信
+            response = requests.delete(url, headers=headers, json=data)
+            
+            # 200または404なら成功 (404はファイルが存在しない場合)
+            if response.status_code == 200 or response.status_code == 404:
+                try:
+                    return response.json()
+                except:
+                    return {"result": "SUCCESS"}
+            else:
+                # エラーメッセージを記録するが例外は発生させない
+                print(f"Failed to unbind command parameter file: {response.status_code} - {response.text}")
+                return {"result": "ERROR", "message": f"Unbind failed: {response.text}"}
+        except Exception as e:
+            print(f"Exception in unbind_command_parameter_file: {str(e)}")
+            return {"result": "ERROR", "message": f"Exception: {str(e)}"}
+    
+    def update_command_parameter_file(self, file_name, comment, contents):
+        """
+        既存のコマンドパラメーターファイルを更新
+        
+        Args:
+            file_name (str): コマンドパラメーターファイル名
+            comment (str): コメント
+            contents (str): Base64エンコードされたファイルの内容
+        
+        Returns:
+            Dict[str, Any]: API応答
+        """
+        token = self.get_access_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        url = f"{BASE_URL}/command_parameter_files/{file_name}"
+        
+        # CommandParamUpdate.pyと同じリクエスト形式
+        data = {
+            "parameter": contents,  # parameterが正しいキー名
+            "comment": comment
+        }
+        
+        print(f"Updating command parameter file: {file_name}")
+        print(f"Parameter length: {len(contents)}")
+        
+        response = requests.patch(url, headers=headers, json=data)
+        response_text = response.text
+        print(f"Update response status: {response.status_code}, body: {response_text}")
+        
+        if response.status_code == 200:
+            try:
+                return json.loads(response_text)
+            except:
+                return {"result": "SUCCESS"}
+        else:
+            print(f"Failed to update command parameter file: {response.status_code} - {response_text}")
+            return {"result": "ERROR", "message": f"Update failed: {response_text}"}
+    
+    def bind_command_parameter_file(self, file_name, device_ids):
+        """
+        コマンドパラメーターファイルをデバイスにバインド
+        
+        Args:
+            file_name (str): コマンドパラメーターファイル名
+            device_ids (list): バインド対象のデバイスIDリスト
+        
+        Returns:
+            Dict[str, Any]: API応答
+        """
+        if not device_ids:
+            print(f"No device IDs provided for binding to {file_name}")
+            return {"result": "SUCCESS", "message": "No devices to bind"}
+            
+        token = self.get_access_token()
+        
+        # 正しいエンドポイントと形式
+        url = f"{BASE_URL}/devices/configuration/command_parameter_files/{file_name}"
+        
+        # API仕様に基づいた正しいデータ形式（カンマ区切りの文字列）
+        device_ids_str = ",".join(device_ids)
+        data = {
+            "device_ids": device_ids_str
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        print(f"Binding command parameter file {file_name} to devices: {device_ids}")
+        
+        try:
+            # PUTメソッドでJSONデータを送信
+            response = requests.put(url, headers=headers, json=data)
+            response_text = response.text
+            print(f"Bind response status: {response.status_code}, body: {response_text}")
+            
+            if response.status_code == 200:
+                try:
+                    return json.loads(response_text)
+                except:
+                    return {"result": "SUCCESS"}
+            else:
+                print(f"Failed to bind command parameter file: {response.status_code} - {response_text}")
+                return {"result": "ERROR", "message": f"Bind failed: {response_text}"}
+        except Exception as e:
+            print(f"Exception in bind_command_parameter_file: {str(e)}")
+            return {"result": "ERROR", "message": f"Exception: {str(e)}"}
