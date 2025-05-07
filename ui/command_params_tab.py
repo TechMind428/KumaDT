@@ -9,8 +9,13 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, StringVar, IntVar, DoubleVar
 import json
+import re
+import logging
 
 from core.command_parameter_manager import CommandParameterManager
+
+# ロガーの設定
+logger = logging.getLogger(__name__)
 
 class CommandParamsTab:
     """
@@ -37,50 +42,52 @@ class CommandParamsTab:
         """
         UIコンポーネントの初期化と配置
         """
+        # メインフレーム（スクロール可能）
+        self.main_frame = ttk.Frame(self.parent)
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # キャンバスとスクロールバー
+        self.canvas = tk.Canvas(self.main_frame)
+        self.scrollbar = ttk.Scrollbar(self.main_frame, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # スクロール可能なフレーム
+        self.scrollable_frame = ttk.Frame(self.canvas)
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        
         # デバイス選択領域
-        self.device_frame = ttk.LabelFrame(self.parent, text="対象デバイス")
+        self.device_frame = ttk.LabelFrame(self.scrollable_frame, text="対象デバイス")
         self.device_frame.pack(fill=tk.X, padx=10, pady=5)
         
         device_selection_frame = ttk.Frame(self.device_frame)
         device_selection_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        ttk.Label(device_selection_frame, text="デバイス:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(device_selection_frame, text="デバイスID:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         
-        # デバイス選択用のコンボボックス
+        # デバイスID入力フィールド - 設定画面からのデバイスIDを使用
         self.device_id_var = StringVar()
-        self.device_selector = ttk.Combobox(device_selection_frame, textvariable=self.device_id_var, width=50, state="readonly")
-        self.device_selector.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
-        self.device_selector.bind("<<ComboboxSelected>>", self.on_device_selected)
+        self.device_id_entry = ttk.Entry(device_selection_frame, textvariable=self.device_id_var, width=50, state="readonly")
+        self.device_id_entry.grid(row=0, column=1, sticky=tk.W+tk.E, padx=5, pady=5)
         
-        # 取得ボタン
-        self.fetch_button = ttk.Button(device_selection_frame, text="取得", command=self.fetch_parameters)
-        self.fetch_button.grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
-        
-        # スクロール可能なキャンバス（大きなコンテンツ用）
-        self.canvas = tk.Canvas(self.parent)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # スクロールバー
-        self.scrollbar = ttk.Scrollbar(self.parent, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        
-        # キャンバス内のフレーム
-        self.scroll_frame = ttk.Frame(self.canvas)
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.scroll_frame, anchor=tk.NW)
+        # バインド情報表示
+        self.bound_file_info = ttk.Label(device_selection_frame, text="")
+        self.bound_file_info.grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
         
         # パラメーター設定領域
-        self.params_frame = ttk.LabelFrame(self.scroll_frame, text="コマンドパラメーター設定")
-        self.params_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.params_frame = ttk.LabelFrame(self.scrollable_frame, text="コマンドパラメーター設定")
+        self.params_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # アップロードモード設定
         mode_frame = ttk.LabelFrame(self.params_frame, text="アップロードモード")
         mode_frame.pack(fill=tk.X, padx=5, pady=5)
         
         self.mode_var = IntVar(value=2)  # デフォルトは推論結果のみ
-        ttk.Radiobutton(mode_frame, text="入力画像のみ (0)", variable=self.mode_var, value=0, command=self.update_ui_by_mode).pack(anchor=tk.W, padx=5, pady=2)
-        ttk.Radiobutton(mode_frame, text="入力画像と推論結果 (1)", variable=self.mode_var, value=1, command=self.update_ui_by_mode).pack(anchor=tk.W, padx=5, pady=2)
-        ttk.Radiobutton(mode_frame, text="推論結果のみ (2)", variable=self.mode_var, value=2, command=self.update_ui_by_mode).pack(anchor=tk.W, padx=5, pady=2)
+        ttk.Radiobutton(mode_frame, text="入力画像のみ (0)", variable=self.mode_var, value=0).pack(anchor=tk.W, padx=5, pady=2)
+        ttk.Radiobutton(mode_frame, text="入力画像と推論結果 (1)", variable=self.mode_var, value=1).pack(anchor=tk.W, padx=5, pady=2)
+        ttk.Radiobutton(mode_frame, text="推論結果のみ (2)", variable=self.mode_var, value=2).pack(anchor=tk.W, padx=5, pady=2)
         
         # 画像アップロード設定
         self.img_upload_frame = ttk.LabelFrame(self.params_frame, text="画像アップロード設定")
@@ -97,11 +104,11 @@ class CommandParamsTab:
         
         ttk.Label(img_upload_grid, text="ストレージ名:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
         self.storage_name_var = StringVar(value="http://localhost:8080")
-        ttk.Entry(img_upload_grid, textvariable=self.storage_name_var, width=40).grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(img_upload_grid, textvariable=self.storage_name_var, width=40).grid(row=1, column=1, sticky=tk.W+tk.E, padx=5, pady=2)
         
         ttk.Label(img_upload_grid, text="サブディレクトリパス:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
         self.storage_subdir_var = StringVar(value="/image/{device_id}")
-        ttk.Entry(img_upload_grid, textvariable=self.storage_subdir_var, width=40).grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(img_upload_grid, textvariable=self.storage_subdir_var, width=40).grid(row=2, column=1, sticky=tk.W+tk.E, padx=5, pady=2)
         
         ttk.Label(img_upload_grid, text="ファイル形式:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
         self.file_format_var = StringVar(value="JPG")
@@ -124,11 +131,11 @@ class CommandParamsTab:
         
         ttk.Label(ir_upload_grid, text="ストレージ名:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
         self.storage_name_ir_var = StringVar(value="http://localhost:8080")
-        ttk.Entry(ir_upload_grid, textvariable=self.storage_name_ir_var, width=40).grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(ir_upload_grid, textvariable=self.storage_name_ir_var, width=40).grid(row=1, column=1, sticky=tk.W+tk.E, padx=5, pady=2)
         
         ttk.Label(ir_upload_grid, text="サブディレクトリパス:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
         self.storage_subdir_ir_var = StringVar(value="/meta/{device_id}")
-        ttk.Entry(ir_upload_grid, textvariable=self.storage_subdir_ir_var, width=40).grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(ir_upload_grid, textvariable=self.storage_subdir_ir_var, width=40).grid(row=2, column=1, sticky=tk.W+tk.E, padx=5, pady=2)
         
         # 画像切り抜き設定
         crop_frame = ttk.LabelFrame(self.params_frame, text="画像切り抜き設定")
@@ -195,167 +202,177 @@ class CommandParamsTab:
         self.input_height_var = IntVar(value=320)
         ttk.Entry(ppl_grid, textvariable=self.input_height_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=5, pady=2)
         
+        # 結果表示エリア
+        self.params_result = ttk.Label(self.params_frame, text="", background="#f0f0f0")
+        self.params_result.pack(fill=tk.X, padx=5, pady=5)
+        
         # 操作ボタン
         button_frame = ttk.Frame(self.params_frame)
         button_frame.pack(fill=tk.X, padx=5, pady=10)
         
+        # キャンセルと適用ボタン (右寄せ)
+        self.cancel_button = ttk.Button(button_frame, text="キャンセル", command=self.on_cancel)
+        self.cancel_button.pack(side=tk.RIGHT, padx=5)
+        
         self.apply_button = ttk.Button(button_frame, text="適用", command=self.apply_parameters)
         self.apply_button.pack(side=tk.RIGHT, padx=5)
         
-        self.reset_button = ttk.Button(button_frame, text="リセット", command=self.reset_parameters)
-        self.reset_button.pack(side=tk.RIGHT, padx=5)
-        
-        # ステータス表示
-        self.status_var = StringVar()
-        self.status_label = ttk.Label(self.params_frame, textvariable=self.status_var, foreground="blue")
-        self.status_label.pack(fill=tk.X, padx=5, pady=5)
-        
-        # キャンバスの更新イベント
-        self.scroll_frame.bind("<Configure>", self.on_frame_configure)
+        # スクロールの設定
+        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", self.on_canvas_configure)
         
-        # 初期UIの更新
-        self.update_ui_by_mode()
-        self.update_device_selector()
+        # マウスホイールのスクロールイベントを設定
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        
+        # 初期状態では設定欄を無効化
         self.disable_parameters_ui()
+        
+        # 初期化時にデバイスIDを取得
+        self.load_device_id()
+        
+        # 100ms後にパラメーター自動取得を実行
+        self.parent.after(100, self.fetch_parameters)
     
-    def on_frame_configure(self, event):
-        """
-        スクロールフレームサイズ変更時のイベントハンドラ
-        """
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+    def _on_mousewheel(self, event):
+        """マウスホイールのスクロールイベント"""
+        self.canvas.yview_scroll(-1 * (event.delta // 120), "units")
     
     def on_canvas_configure(self, event):
-        """
-        キャンバスサイズ変更時のイベントハンドラ
-        """
-        # キャンバスの幅に合わせてフレームの幅を設定
+        """キャンバスのリサイズ時にスクロール可能なフレームの幅を調整"""
         self.canvas.itemconfig(self.canvas_window, width=event.width)
     
-    def update_device_selector(self):
-        """
-        デバイスセレクタを更新
-        """
-        # 設定からデバイスリストを取得
-        config = self.settings_manager.config
-        devices = config.get('objclass', [])
+    def load_device_id(self):
+        """設定画面からデバイスIDを読み込む"""
+        # 設定マネージャーからデバイスIDを取得
+        device_id = self.settings_manager.config.get('DEVICE_ID', "")
         
-        # デバイスセレクタの選択肢を設定
-        device_options = []
-        for i, device_name in enumerate(devices):
-            device_id = config.get('DEVICE_ID', "")
-            if device_id:
-                device_options.append(f"{device_name} ({device_id})")
-        
-        if device_options:
-            self.device_selector['values'] = device_options
-            self.device_selector.current(0)  # 最初のデバイスを選択
-            self.fetch_button.config(state=tk.NORMAL)  # 取得ボタンを有効化
+        if device_id:
+            self.device_id_var.set(device_id)
         else:
-            self.device_selector['values'] = ["デバイスがありません"]
-            self.device_selector.current(0)
-            self.fetch_button.config(state=tk.DISABLED)  # 取得ボタンを無効化
-            self.disable_parameters_ui()
-    
-    def on_device_selected(self, event):
-        """
-        デバイス選択変更時のイベントハンドラ
-        """
-        # 選択変更時に取得ボタンを有効化
-        selected_device = self.device_selector.get()
-        if selected_device and selected_device != "デバイスがありません":
-            self.fetch_button.config(state=tk.NORMAL)
-        else:
-            self.fetch_button.config(state=tk.DISABLED)
-            self.disable_parameters_ui()
+            self.device_id_var.set("デバイスIDが設定されていません")
+            # デバイスIDがない場合は警告を表示
+            self.params_result.config(
+                text="デバイスIDが設定されていません。設定画面でデバイスIDを設定してください。",
+                foreground="red",
+                background="#ffe6e6"
+            )
     
     def update_ui_by_mode(self):
-        """
-        選択されたモードに応じてUIを更新
-        """
-        mode = self.mode_var.get()
-        
-        # モードに応じて関連UIの表示/非表示を設定
-        if mode in [0, 1]:  # 画像のみ または 画像と推論結果
-            self.img_upload_frame.pack(fill=tk.X, padx=5, pady=5)
-        else:
-            self.img_upload_frame.pack_forget()
-        
-        if mode in [1, 2]:  # 推論結果のみ または 画像と推論結果
-            self.ir_upload_frame.pack(fill=tk.X, padx=5, pady=5)
-        else:
-            self.ir_upload_frame.pack_forget()
+        """選択されたモードに応じてUIを更新"""
+        # モードによらず全ての項目を表示する（req：常に全項目表示）
+        # この関数は何もしない（項目の表示/非表示切り替えをしない）
+        pass
     
     def disable_parameters_ui(self):
-        """
-        パラメーターUI要素を無効化
-        """
+        """パラメーターUI要素を無効化"""
         # パラメーター設定部分を無効化
         for child in self.params_frame.winfo_children():
-            for widget in child.winfo_children():
-                if isinstance(widget, (ttk.Entry, ttk.Combobox, ttk.Radiobutton, ttk.Button)) and widget != self.fetch_button:
-                    widget.configure(state=tk.DISABLED)
+            if isinstance(child, ttk.LabelFrame):
+                for widget in child.winfo_children():
+                    if isinstance(widget, (ttk.Entry, ttk.Combobox, ttk.Radiobutton)):
+                        widget.configure(state=tk.DISABLED)
+            elif isinstance(widget, ttk.Frame):
+                for subwidget in widget.winfo_children():
+                    if isinstance(subwidget, (ttk.Entry, ttk.Combobox, ttk.Radiobutton)):
+                        subwidget.configure(state=tk.DISABLED)
         
-        # ボタンも無効化
+        # ボタンを無効化
         self.apply_button.configure(state=tk.DISABLED)
-        self.reset_button.configure(state=tk.DISABLED)
     
     def enable_parameters_ui(self):
-        """
-        パラメーターUI要素を有効化
-        """
+        """パラメーターUI要素を有効化"""
         # パラメーター設定部分を有効化
         for child in self.params_frame.winfo_children():
-            for widget in child.winfo_children():
-                if isinstance(widget, (ttk.Entry, ttk.Combobox, ttk.Radiobutton)):
-                    widget.configure(state=tk.NORMAL)
-                # コンボボックスはreadonlyに
-                if isinstance(widget, ttk.Combobox):
-                    widget.configure(state="readonly")
+            if isinstance(child, ttk.LabelFrame):
+                for widget in child.winfo_children():
+                    if isinstance(widget, ttk.Entry):
+                        widget.configure(state=tk.NORMAL)
+                    elif isinstance(widget, ttk.Combobox):
+                        widget.configure(state="readonly")
+                    elif isinstance(widget, ttk.Radiobutton):
+                        widget.configure(state=tk.NORMAL)
+                    elif isinstance(widget, ttk.Frame):
+                        for subwidget in widget.winfo_children():
+                            if isinstance(subwidget, ttk.Entry):
+                                subwidget.configure(state=tk.NORMAL)
+                            elif isinstance(subwidget, ttk.Combobox):
+                                subwidget.configure(state="readonly")
+                            elif isinstance(subwidget, ttk.Radiobutton):
+                                subwidget.configure(state=tk.NORMAL)
+            elif isinstance(child, ttk.Frame):
+                for widget in child.winfo_children():
+                    if isinstance(widget, ttk.Entry):
+                        widget.configure(state=tk.NORMAL)
+                    elif isinstance(widget, ttk.Combobox):
+                        widget.configure(state="readonly")
+                    elif isinstance(widget, ttk.Radiobutton):
+                        widget.configure(state=tk.NORMAL)
         
-        # ボタンも有効化
+        # ボタンを有効化
         self.apply_button.configure(state=tk.NORMAL)
-        self.reset_button.configure(state=tk.NORMAL)
         
         # モードに応じたUI更新
         self.update_ui_by_mode()
     
     def fetch_parameters(self):
-        """
-        デバイスからパラメーターを取得
-        """
-        # 選択されたデバイスからIDを抽出
-        selected_device = self.device_selector.get()
-        if not selected_device or selected_device == "デバイスがありません":
-            self.status_var.set("デバイスが選択されていません")
-            return
+        """デバイスからパラメーターを取得"""
+        device_id = self.device_id_var.get()
         
-        # デバイスIDの取得（括弧内の文字列を抽出）
-        import re
-        match = re.search(r'\((.*?)\)', selected_device)
-        if match:
-            device_id = match.group(1)
-        else:
-            # デバイスIDがない場合は設定から取得
-            device_id = self.settings_manager.config.get('DEVICE_ID', "")
-        
-        if not device_id:
-            self.status_var.set("デバイスIDが取得できません")
+        if not device_id or device_id == "デバイスIDが設定されていません":
+            messagebox.showerror("エラー", "有効なデバイスIDが設定されていません。")
             return
         
         # ステータス更新
-        self.status_var.set(f"パラメーター取得中... ({device_id})")
+        self.params_result.config(text=f"パラメーター取得中... ({device_id})")
         self.parent.update()  # UI更新
         
-        # バックグラウンドでのパラメーター取得は本来は非同期で行うべきだが
-        # ここではシンプルに同期的に実装
         try:
+            # APIを使ってコマンドパラメーターファイルの情報を取得
+            bound_file_info = None
+            try:
+                # デバイスに紐づけられたパラメーターファイルとその内容を取得
+                file_name, file_info = self.command_param_manager.get_parameter_file_for_device(device_id)
+                if file_name:
+                    self.bound_file_info.config(
+                        text=f"バインドされているファイル: {file_name}",
+                        foreground="green"
+                    )
+                    bound_file_info = file_info
+                else:
+                    self.bound_file_info.config(
+                        text="バインドされているファイルがありません",
+                        foreground="red"
+                    )
+                    messagebox.showwarning("警告", "このデバイスにはコマンドパラメーターファイルがバインドされていません。")
+                    return
+            except Exception as e:
+                print(f"パラメーターファイル情報取得エラー: {str(e)}")
+                self.bound_file_info.config(
+                    text="バインド情報取得エラー",
+                    foreground="red"
+                )
+            
+            # パラメーター取得
             parameters = self.command_param_manager.get_device_parameters(device_id)
+            
+            # UIにパラメーターを設定
             self.set_parameters_to_ui(parameters)
+            
+            # UIを有効化
             self.enable_parameters_ui()
-            self.status_var.set(f"パラメーター取得完了 ({device_id})")
+            
+            # 成功メッセージ
+            self.params_result.config(
+                text=f"パラメーター取得完了 ({device_id})",
+                foreground="green",
+                background="#e6ffe6"
+            )
         except Exception as e:
-            self.status_var.set(f"エラー: {str(e)}")
+            self.params_result.config(
+                text=f"エラー: {str(e)}",
+                foreground="red",
+                background="#ffe6e6"
+            )
             messagebox.showerror("パラメーター取得エラー", f"パラメーターの取得中にエラーが発生しました:\n{str(e)}")
     
     def set_parameters_to_ui(self, parameters):
@@ -376,7 +393,11 @@ class CommandParamsTab:
                     break
             
             if not start_upload_cmd or "parameters" not in start_upload_cmd:
-                self.status_var.set("パラメーターフォーマットが無効です")
+                self.params_result.config(
+                    text="パラメーターフォーマットが無効です",
+                    foreground="red",
+                    background="#ffe6e6"
+                )
                 return
             
             params = start_upload_cmd["parameters"]
@@ -413,11 +434,21 @@ class CommandParamsTab:
             self.input_width_var.set(ppl_params.get("input_width", 320))
             self.input_height_var.set(ppl_params.get("input_height", 320))
             
-            # モードに応じたUI更新
-            self.update_ui_by_mode()
+            # モードに応じたUI更新を遅延実行
+            self.parent.after(100, self.update_ui_by_mode)
+            
+            # バインド情報を表示
+            self.bound_file_info.config(
+                text="バインドされているファイル: あり",
+                foreground="green"
+            )
             
         except Exception as e:
-            self.status_var.set(f"パラメーター設定エラー: {str(e)}")
+            self.params_result.config(
+                text=f"パラメーター設定エラー: {str(e)}",
+                foreground="red",
+                background="#ffe6e6"
+            )
             messagebox.showerror("パラメーター設定エラー", f"UIへのパラメーター設定中にエラーが発生しました:\n{str(e)}")
     
     def get_parameters_from_ui(self):
@@ -431,6 +462,14 @@ class CommandParamsTab:
             # 基本パラメーター
             mode = self.mode_var.get()
             
+            # デバイスIDからサフィックスを抽出（存在する場合）
+            device_id = self.device_id_var.get()
+            device_suffix = device_id.split('-')[-1] if device_id and '-' in device_id else device_id
+            
+            # StorageSubDirectoryPathの{device_id}をサフィックスに置換
+            storage_subdir = self.storage_subdir_var.get().replace("{device_id}", device_suffix)
+            storage_subdir_ir = self.storage_subdir_ir_var.get().replace("{device_id}", device_suffix)
+            
             # パラメーター辞書を構築
             cmd_params = {
                 "Mode": mode,
@@ -441,6 +480,7 @@ class CommandParamsTab:
                 "CropHSize": self.crop_h_size_var.get(),
                 "CropVSize": self.crop_v_size_var.get(),
                 "NumberOfImages": self.num_images_var.get(),
+                "MaxDetectionsPerFrame": self.max_detections_var.get(),
                 "PPLParameter": {
                     "header": {
                         "id": "00",
@@ -459,7 +499,7 @@ class CommandParamsTab:
                 cmd_params.update({
                     "UploadMethod": self.upload_method_var.get(),
                     "StorageName": self.storage_name_var.get(),
-                    "StorageSubDirectoryPath": self.storage_subdir_var.get(),
+                    "StorageSubDirectoryPath": storage_subdir,
                     "FileFormat": self.file_format_var.get()
                 })
             
@@ -467,7 +507,7 @@ class CommandParamsTab:
                 cmd_params.update({
                     "UploadMethodIR": self.upload_method_ir_var.get(),
                     "StorageNameIR": self.storage_name_ir_var.get(),
-                    "StorageSubDirectoryPathIR": self.storage_subdir_ir_var.get()
+                    "StorageSubDirectoryPathIR": storage_subdir_ir
                 })
             
             # 最終的なパラメーター形式
@@ -483,7 +523,11 @@ class CommandParamsTab:
             return parameters
             
         except Exception as e:
-            self.status_var.set(f"パラメーター取得エラー: {str(e)}")
+            self.params_result.config(
+                text=f"パラメーター取得エラー: {str(e)}",
+                foreground="red",
+                background="#ffe6e6"
+            )
             messagebox.showerror("パラメーター取得エラー", f"UIからのパラメーター取得中にエラーが発生しました:\n{str(e)}")
             return None
     
@@ -538,31 +582,20 @@ class CommandParamsTab:
             return True
             
         except Exception as e:
-            self.status_var.set(f"バリデーションエラー: {str(e)}")
+            self.params_result.config(
+                text=f"バリデーションエラー: {str(e)}",
+                foreground="red",
+                background="#ffe6e6"
+            )
             messagebox.showerror("バリデーションエラー", f"パラメーターのバリデーション中にエラーが発生しました:\n{str(e)}")
             return False
     
     def apply_parameters(self):
-        """
-        パラメーターを適用
-        """
-        # 選択されたデバイスからIDを抽出
-        selected_device = self.device_selector.get()
-        if not selected_device or selected_device == "デバイスがありません":
-            self.status_var.set("デバイスが選択されていません")
-            return
+        """パラメーターを適用"""
+        device_id = self.device_id_var.get()
         
-        # デバイスIDの取得（括弧内の文字列を抽出）
-        import re
-        match = re.search(r'\((.*?)\)', selected_device)
-        if match:
-            device_id = match.group(1)
-        else:
-            # デバイスIDがない場合は設定から取得
-            device_id = self.settings_manager.config.get('DEVICE_ID', "")
-        
-        if not device_id:
-            self.status_var.set("デバイスIDが取得できません")
+        if not device_id or device_id == "デバイスIDが設定されていません":
+            messagebox.showerror("エラー", "有効なデバイスIDが設定されていません。")
             return
         
         # パラメーターのバリデーション
@@ -575,43 +608,69 @@ class CommandParamsTab:
             return
         
         # 確認ダイアログを表示
-        if not messagebox.askyesno("確認", f"パラメーターをデバイス {device_id} に適用しますか？"):
+        if not messagebox.askyesno("確認", f"パラメーターをデバイス {device_id} に適用しますか？\n(推論を一時停止して適用します)"):
             return
         
         # ステータス更新
-        self.status_var.set(f"パラメーター適用中... ({device_id})")
+        self.params_result.config(
+            text=f"パラメーターを適用中... ({device_id})",
+            foreground="blue",
+            background="#e6e6ff"
+        )
         self.parent.update()  # UI更新
         
-        # パラメーターを適用
+        # ボタンを一時的に無効化
+        self.apply_button.config(state=tk.DISABLED)
+        self.cancel_button.config(state=tk.DISABLED)
+        
         try:
+            # パラメーターを適用
             result = self.command_param_manager.apply_parameters(device_id, parameters)
-            if result:
-                self.status_var.set(f"パラメーター適用完了 ({device_id})")
+            
+            # ボタンを再有効化
+            self.apply_button.config(state=tk.NORMAL)
+            self.cancel_button.config(state=tk.NORMAL)
+            
+            if result.get("success", False):
+                self.params_result.config(
+                    text=f"パラメーター適用完了: {result.get('message', '成功')}",
+                    foreground="green",
+                    background="#e6ffe6"
+                )
                 messagebox.showinfo("成功", f"パラメーターがデバイス {device_id} に適用されました")
             else:
-                self.status_var.set(f"パラメーター適用失敗 ({device_id})")
-                messagebox.showerror("エラー", f"パラメーターの適用に失敗しました")
+                self.params_result.config(
+                    text=f"パラメーター適用失敗: {result.get('message', 'エラー')}",
+                    foreground="red",
+                    background="#ffe6e6"
+                )
+                messagebox.showerror("エラー", f"パラメーターの適用に失敗しました:\n{result.get('message', 'エラー')}")
         except Exception as e:
-            self.status_var.set(f"エラー: {str(e)}")
+            # ボタンを再有効化
+            self.apply_button.config(state=tk.NORMAL)
+            self.cancel_button.config(state=tk.NORMAL)
+            
+            self.params_result.config(
+                text=f"エラー: {str(e)}",
+                foreground="red",
+                background="#ffe6e6"
+            )
             messagebox.showerror("パラメーター適用エラー", f"パラメーターの適用中にエラーが発生しました:\n{str(e)}")
     
-    def reset_parameters(self):
-        """
-        パラメーターをデフォルト値にリセット
-        """
-        if not messagebox.askyesno("確認", "パラメーターをデフォルト値にリセットしますか？"):
-            return
-        
-        # デフォルトパラメーターを取得
-        default_params = self.command_param_manager.get_default_parameters()
-        
-        # UIに設定
-        self.set_parameters_to_ui(default_params)
-        self.status_var.set("パラメーターをデフォルト値にリセットしました")
+    def on_cancel(self):
+        """キャンセルボタンのアクション"""
+        # 親タブに戻る処理などをここに実装
+        if messagebox.askyesno("確認", "変更を破棄してキャンセルしますか？"):
+            # タブの選択等の処理が必要な場合は親オブジェクトから実行
+            # 実装例: self.parent.master.select(0)  # メインタブに戻る
+            pass
     
     def refresh(self):
         """
         タブの表示時に呼び出される更新処理
         """
-        # デバイスセレクタを更新
-        self.update_device_selector()
+        # デバイスIDを更新
+        self.load_device_id()
+        
+        # パラメーター自動取得を実行
+        self.fetch_parameters()

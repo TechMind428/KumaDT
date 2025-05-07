@@ -8,11 +8,13 @@ AITRIOSデバイスのコマンドパラメーターを管理する
 
 import json
 import base64
-import time
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
 from api.aitrios_client import AITRIOSClient
+
+# ロガーの設定
+logger = logging.getLogger(__name__)
 
 class CommandParameterManager:
     """
@@ -27,9 +29,6 @@ class CommandParameterManager:
             aitrios_client: AITRIOSクライアント
         """
         self.aitrios_client = aitrios_client
-        self.parameter_cache = {}  # デバイスIDをキーとするパラメーターキャッシュ
-        self.cache_timestamp = 0  # キャッシュのタイムスタンプ
-        self.cache_ttl = 300  # キャッシュの有効期間（秒）
     
     def get_default_parameters(self) -> Dict[str, Any]:
         """
@@ -75,6 +74,54 @@ class CommandParameterManager:
             ]
         }
     
+    def get_parameter_file_for_device(self, device_id: str) -> Tuple[str, Dict[str, Any]]:
+        """
+        デバイスに対応するパラメーターファイル名を取得
+        
+        Args:
+            device_id: デバイスID
+            
+        Returns:
+            Tuple[str, Dict[str, Any]]: (ファイル名, バインド情報)
+        """
+        try:
+            # パラメーターファイル一覧を取得
+            files_data = self.aitrios_client.get_command_parameter_files()
+            
+            # デバッグ情報としてパラメーターファイル一覧の内容を出力
+            param_list = files_data.get("parameter_list", [])
+            logger.info(f"Parameter files contains {len(param_list)} files")
+            
+            # このデバイスがバインドされているファイルを確認
+            for param_file in param_list:
+                device_ids = param_file.get("device_ids", [])
+                if device_id in device_ids:
+                    file_name = param_file.get("file_name", "")
+                    logger.info(f"Device {device_id} is bound to file {file_name}")
+                    
+                    # ファイルの内容を取得
+                    if "parameter" not in param_file:
+                        file_data = self.aitrios_client.export_command_parameter_file(file_name)
+                        if file_data and "parameter" in file_data:
+                            # Base64デコードしてJSONオブジェクトに変換
+                            encoded_param = file_data.get("parameter", "")
+                            try:
+                                decoded_bytes = base64.b64decode(encoded_param)
+                                param_json = json.loads(decoded_bytes.decode('utf-8'))
+                                param_file["parameter"] = param_json
+                            except Exception as e:
+                                logger.error(f"Error decoding parameter file: {str(e)}")
+                    
+                    return file_name, param_file
+            
+            # 見つからない場合は空の情報を返す
+            logger.warning(f"No parameter file found for device {device_id}")
+            return "", {}
+            
+        except Exception as e:
+            logger.error(f"Error getting parameter file for device {device_id}: {str(e)}")
+            return "", {}
+    
     def get_device_parameters(self, device_id: str) -> Dict[str, Any]:
         """
         デバイスの現在のコマンドパラメーターを取得
@@ -85,33 +132,29 @@ class CommandParameterManager:
         Returns:
             Dict[str, Any]: コマンドパラメーター
         """
-        current_time = time.time()
-        
-        # キャッシュが有効期限内か確認
-        if device_id in self.parameter_cache and (current_time - self.cache_timestamp) < self.cache_ttl:
-            print(f"キャッシュからパラメーターを返します： {device_id}")
-            return self.parameter_cache[device_id]
-        
         try:
-            # AITRIOSからのパラメーター取得を試みる
-            print(f"AITRIOSからパラメーターを取得します： {device_id}")
-            # ここでは処理の流れを説明するだけのダミーコード
-            # 実際の実装ではAITRIOSクライアントを使用してAPIからパラメーターを取得する
+            # 毎回新しくAITRIOSからパラメーターを取得
+            logger.info(f"Getting parameters for device {device_id}")
             
-            # ダミーデータ（実際にはAPIから取得）
-            parameters = self.get_default_parameters()
+            # デバイスがコマンドパラメーターファイルにバインドされているか確認
+            file_name, file_info = self.get_parameter_file_for_device(device_id)
             
-            # キャッシュに保存
-            self.parameter_cache[device_id] = parameters
-            self.cache_timestamp = current_time
-            
-            return parameters
+            if file_name and "parameter" in file_info:
+                # バインドされているファイルからパラメーターを取得
+                parameters = file_info["parameter"]
+                logger.info(f"Found parameters for device {device_id} in file {file_name}")
+                return parameters
+            else:
+                # バインドされていない場合はデフォルトパラメーターを返す
+                logger.warning(f"No parameter file found for device {device_id}, returning defaults")
+                return self.get_default_parameters()
+                
         except Exception as e:
-            print(f"パラメーター取得エラー: {str(e)}")
+            logger.error(f"Error getting device parameters for {device_id}: {str(e)}")
             # エラー時はデフォルトパラメーターを返す
             return self.get_default_parameters()
     
-    def apply_parameters(self, device_id: str, parameters: Dict[str, Any]) -> bool:
+    def apply_parameters(self, device_id: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         デバイスにコマンドパラメーターを適用
         
@@ -120,31 +163,78 @@ class CommandParameterManager:
             parameters: 適用するパラメーター
             
         Returns:
-            bool: 成功したかどうか
+            Dict[str, Any]: 実行結果
         """
         try:
-            # バリデーション
+            # パラメーターの検証
             if not self._validate_parameters(parameters):
-                print("パラメーターのバリデーションに失敗しました")
-                return False
+                return {"success": False, "message": "無効なパラメーター形式です。'commands'キーが必要です。"}
             
-            # AITRIOSにパラメーターを適用
-            print(f"AITRIOSにパラメーターを適用します: {device_id}")
+            # デバイスがバインドされているファイルを確認
+            bound_file_name, bound_file_info = self.get_parameter_file_for_device(device_id)
             
-            # パラメーターをエンコード
-            encoded_parameters = self._encode_parameters(parameters)
+            # バインドされていない場合はエラー
+            if not bound_file_name:
+                return {"success": False, "message": "デバイスにパラメーターファイルがバインドされていません。コンソールでバインドしてください。"}
             
-            # ここではデモ用に成功を返す
-            # 実際の実装では、AITRIOSクライアントを使ってAPIを呼び出す
+            # コメント設定
+            comment = f"Updated parameters for device {device_id}"
             
-            # キャッシュを更新
-            self.parameter_cache[device_id] = parameters
-            self.cache_timestamp = time.time()
+            # パラメーターをJSONに変換してBase64エンコード
+            command_param_data = {
+                "commands": parameters.get("commands", [])
+            }
             
-            return True
+            command_param_json = json.dumps(command_param_data, indent=4, ensure_ascii=False)
+            encoded_param_data = base64.b64encode(command_param_json.encode('utf-8')).decode('utf-8')
+            
+            logger.info(f"Preparing to update command parameter file {bound_file_name} for device {device_id}")
+            logger.info(f"Encoded contents length: {len(encoded_param_data)} bytes")
+            
+            # エンコードされたデータが空でないか確認
+            if not encoded_param_data:
+                logger.error("Generated parameter data is empty")
+                return {"success": False, "message": "パラメーターのエンコードに失敗しました"}
+            
+            try:
+                # 1. デバイスをアンバインド
+                logger.info(f"Unbinding device {device_id} from file {bound_file_name}")
+                unbind_result = self.aitrios_client.unbind_command_parameter_file(bound_file_name, [device_id])
+                
+                if unbind_result.get("result") != "SUCCESS":
+                    logger.warning(f"Unbind may have failed: {unbind_result}")
+                else:
+                    logger.info(f"Successfully unbound device {device_id} from file {bound_file_name}")
+                
+                # 2. パラメーターファイルを更新
+                logger.info(f"Updating command parameter file {bound_file_name}")
+                update_result = self.aitrios_client.update_command_parameter_file(bound_file_name, comment, encoded_param_data)
+                
+                if update_result.get("result") != "SUCCESS":
+                    logger.error(f"Failed to update parameter file: {update_result}")
+                    return {"success": False, "message": f"パラメーターファイルの更新に失敗しました: {update_result.get('message', '')}"}
+                
+                logger.info(f"Successfully updated parameter file {bound_file_name}")
+                
+                # 3. デバイスを再バインド
+                logger.info(f"Rebinding device {device_id} to file {bound_file_name}")
+                bind_result = self.aitrios_client.bind_command_parameter_file(bound_file_name, [device_id])
+                
+                if bind_result.get("result") != "SUCCESS":
+                    logger.error(f"Failed to bind device: {bind_result}")
+                    return {"success": False, "message": f"デバイスのバインドに失敗しました: {bind_result.get('message', '')}"}
+                
+                logger.info(f"Successfully bound device {device_id} to file {bound_file_name}")
+                
+                return {"success": True, "message": f"コマンドパラメーターを正常に適用しました"}
+                
+            except Exception as api_error:
+                logger.error(f"API error while applying command parameters: {str(api_error)}")
+                return {"success": False, "message": f"APIエラー: {str(api_error)}"}
+            
         except Exception as e:
-            print(f"パラメーター適用エラー: {str(e)}")
-            return False
+            logger.error(f"Error applying command parameters for {device_id}: {str(e)}")
+            return {"success": False, "message": f"エラーが発生しました: {str(e)}"}
     
     def _validate_parameters(self, parameters: Dict[str, Any]) -> bool:
         """
@@ -157,7 +247,7 @@ class CommandParameterManager:
             bool: バリデーション結果
         """
         # コマンドが存在するか確認
-        if "commands" not in parameters or not parameters["commands"]:
+        if "commands" not in parameters:
             return False
         
         # StartUploadInferenceDataコマンドが存在するか確認
@@ -196,21 +286,3 @@ class CommandParameterManager:
                     return False
         
         return True
-    
-    def _encode_parameters(self, parameters: Dict[str, Any]) -> str:
-        """
-        パラメーターをBase64エンコード
-        
-        Args:
-            parameters: エンコードするパラメーター
-            
-        Returns:
-            str: エンコードされたパラメーター
-        """
-        # JSONに変換
-        json_params = json.dumps(parameters, ensure_ascii=False)
-        
-        # Base64エンコード
-        encoded = base64.b64encode(json_params.encode('utf-8')).decode('utf-8')
-        
-        return encoded
