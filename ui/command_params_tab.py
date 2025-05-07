@@ -446,7 +446,7 @@ class CommandParamsTab:
     
     def get_parameters_from_ui(self):
         """
-        UIからパラメーターを取得
+        UIからコマンドパラメーターを取得
         
         Returns:
             dict: パラメーター辞書
@@ -523,10 +523,9 @@ class CommandParamsTab:
             
             return parameters
         except Exception as e:
-            self.status_var.set(f"パラメーター取得エラー: {str(e)}")
-            messagebox.showerror("パラメーター取得エラー", f"UIからのパラメーター取得中にエラーが発生しました:\n{str(e)}")
+            print(f"UIからパラメーター取得エラー: {str(e)}")
             return None
-    
+                
     def validate_parameters(self):
         """
         パラメーターのバリデーション
