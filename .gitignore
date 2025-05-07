@@ -1,0 +1,55 @@
+# Python関連
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 仮想環境
+venv/
+ENV/
+
+# ログファイル
+*.log
+logs/
+
+# 実行時データ
+*.jpg
+*.png
+*.jpeg
+*.gif
+jpeg.jpg
+
+# 設定ファイル（個人情報を含む場合があるため）
+# settings.py はデフォルト設定として含めるが、実際の設定値は.gitignoreする
+# settings_local.py
+
+# IDE関連
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS関連
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
