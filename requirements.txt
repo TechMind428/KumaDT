@@ -3,3 +3,4 @@ opencv-python
 flatbuffers
 pillow
 numpy
+aiohttp
