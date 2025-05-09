@@ -36,8 +36,8 @@ logs/
 jpeg.jpg
 
 # 設定ファイル（個人情報を含む場合があるため）
-# settings.py はデフォルト設定として含めるが、実際の設定値は.gitignoreする
-# settings_local.py
+settings.py はデフォルト設定として含めるが、実際の設定値は.gitignoreする
+settings_local.py
 
 # IDE関連
 .idea/
