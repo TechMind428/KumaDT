@@ -1,0 +1,161 @@
+<!-- コマンドパラメーター設定モーダル -->
+<div id="command-params-modal" class="modal">
+    <div class="modal-content modal-lg">
+        <div class="modal-header">
+            <h2>コマンドパラメーター設定 - <span id="command-params-title">-</span></h2>
+            <span class="close" onclick="closeAllModals()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="command-params-device-id">
+            <div id="bound-file-info" class="connection-result success" style="display: none;"></div>
+            
+            <div class="settings-section">
+                <h3>アップロードモード</h3>
+                <div class="form-group">
+                    <label for="param-mode">Mode:</label>
+                    <select id="param-mode" class="form-control">
+                        <option value="0">入力画像のみ (0)</option>
+                        <option value="1">入力画像と推論結果 (1)</option>
+                        <option value="2" selected>推論結果のみ (2)</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>画像アップロード設定</h3>
+                <div class="form-group">
+                    <label for="param-upload-method">UploadMethod:</label>
+                    <select id="param-upload-method" class="form-control">
+                        <option value="HTTPStorage" selected>HTTPStorage</option>
+                        <option value="BlobStorage">BlobStorage</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="param-storage-name">StorageName:</label>
+                    <input type="text" id="param-storage-name" class="form-control" 
+                           value="http://localhost:8080">
+                </div>
+                <div class="form-group">
+                    <label for="param-storage-sub-dir">StorageSubDirectoryPath:</label>
+                    <input type="text" id="param-storage-sub-dir" class="form-control" 
+                           value="/image/{device_id}">
+                </div>
+                <div class="form-group">
+                    <label for="param-file-format">FileFormat:</label>
+                    <select id="param-file-format" class="form-control">
+                        <option value="JPG" selected>JPG</option>
+                        <option value="BMP">BMP</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>推論結果アップロード設定</h3>
+                <div class="form-group">
+                    <label for="param-upload-method-ir">UploadMethodIR:</label>
+                    <select id="param-upload-method-ir" class="form-control">
+                        <option value="HTTPStorage" selected>HTTPStorage</option>
+                        <option value="Mqtt">Mqtt</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="param-storage-name-ir">StorageNameIR:</label>
+                    <input type="text" id="param-storage-name-ir" class="form-control" 
+                           value="http://localhost:8080">
+                </div>
+                <div class="form-group">
+                    <label for="param-storage-sub-dir-ir">StorageSubDirectoryPathIR:</label>
+                    <input type="text" id="param-storage-sub-dir-ir" class="form-control" 
+                           value="/meta/{device_id}">
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>画像切り抜き設定</h3>
+                <div class="form-row">
+                    <div class="form-group col-6">
+                        <label for="param-crop-h-offset">CropHOffset:</label>
+                        <input type="number" id="param-crop-h-offset" class="form-control" 
+                               min="0" max="4055" value="0">
+                    </div>
+                    <div class="form-group col-6">
+                        <label for="param-crop-v-offset">CropVOffset:</label>
+                        <input type="number" id="param-crop-v-offset" class="form-control" 
+                               min="0" max="3039" value="0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group col-6">
+                        <label for="param-crop-h-size">CropHSize:</label>
+                        <input type="number" id="param-crop-h-size" class="form-control" 
+                               min="0" max="4056" value="4056">
+                    </div>
+                    <div class="form-group col-6">
+                        <label for="param-crop-v-size">CropVSize:</label>
+                        <input type="number" id="param-crop-v-size" class="form-control" 
+                               min="0" max="3040" value="3040">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>アップロードパラメーター</h3>
+                <div class="form-row">
+                    <div class="form-group col-6">
+                        <label for="param-num-images">NumberOfImages:</label>
+                        <input type="number" id="param-num-images" class="form-control" 
+                               min="0" max="10000" value="0">
+                        <small class="text-muted">0 = 無制限</small>
+                    </div>
+                    <div class="form-group col-6">
+                        <label for="param-upload-interval">UploadInterval:</label>
+                        <input type="number" id="param-upload-interval" class="form-control" 
+                               min="1" max="2592000" value="60">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="param-num-inferences">NumberOfInferencesPerMessage:</label>
+                    <input type="number" id="param-num-inferences" class="form-control" 
+                           min="1" max="100" value="1">
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>PPLパラメーター</h3>
+                <div id="ppl-details" class="ppl-details">
+                    <div class="form-row">
+                        <div class="form-group col-6">
+                            <label for="param-max-detections">max_detections:</label>
+                            <input type="number" id="param-max-detections" class="form-control" 
+                                   min="1" max="100" value="1">
+                        </div>
+                        <div class="form-group col-6">
+                            <label for="param-threshold">threshold:</label>
+                            <input type="number" id="param-threshold" class="form-control" 
+                                   min="0.01" max="0.99" step="0.01" value="0.3">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group col-6">
+                            <label for="param-input-width">input_width:</label>
+                            <input type="number" id="param-input-width" class="form-control" 
+                                   min="1" value="320">
+                        </div>
+                        <div class="form-group col-6">
+                            <label for="param-input-height">input_height:</label>
+                            <input type="number" id="param-input-height" class="form-control" 
+                                   min="1" value="320">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="params-result" class="connection-result" style="display: none;"></div>
+            
+            <div class="actions" style="position: sticky; bottom: 0; background-color: white; padding-top: 10px; border-top: 1px solid #ddd;">
+                <button id="reset-params-btn" class="btn btn-outline" onclick="resetParameters()">リセット</button>
+                <button id="apply-params-btn" class="btn btn-primary" onclick="applyCommandParameters()">デバイスに適用</button>
+            </div>
+        </div>
+    </div>
+</div>

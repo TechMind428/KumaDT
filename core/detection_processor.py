@@ -13,6 +13,7 @@ import time
 import cv2
 import numpy as np
 import threading
+import asyncio
 from datetime import datetime
 
 # 現在のディレクトリのパスを取得
@@ -235,11 +236,10 @@ class DetectionProcessor:
             import traceback
             self.notify_status(traceback.format_exc())
             return []
-            
-            
-    def monitor_device_state(self, running_flag):
+    
+    async def monitor_device_state_async(self, running_flag):
         """
-        デバイス状態を定期的に監視
+        デバイス状態を定期的に監視する非同期バージョン
         
         Args:
             running_flag (threading.Event): 処理実行のフラグ
@@ -247,7 +247,7 @@ class DetectionProcessor:
         while running_flag.is_set():
             try:
                 # デバイス状態の取得
-                connection_state, operation_state = self.aitrios_client.get_connection_state()
+                connection_state, operation_state = await self.aitrios_client.get_connection_state()
                 
                 # 状態の通知
                 self.notify_device_state(connection_state, operation_state)
@@ -259,15 +259,31 @@ class DetectionProcessor:
                     self.notify_status(f"デバイス未接続: {connection_state}")
                 
                 # 10秒ごとに状態を更新
-                time.sleep(10)
+                await asyncio.sleep(10)
                 
             except Exception as e:
                 self.notify_status(f"デバイス状態取得エラー: {str(e)}")
-                time.sleep(10)
-                
-    def process_images(self, running_flag):
+                await asyncio.sleep(10)
+    
+    # tkinterとasyncioの連携のためのヘルパーメソッド
+    def monitor_device_state(self, running_flag):
         """
-        画像取得と検出処理のメインループ
+        デバイス状態を定期的に監視（同期ラッパー）
+        
+        Args:
+            running_flag (threading.Event): 処理実行のフラグ
+        """
+        # スレッド内で新しいイベントループを作成
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # 非同期関数を実行
+        loop.run_until_complete(self.monitor_device_state_async(running_flag))
+        loop.close()
+            
+    async def process_images_async(self, running_flag):
+        """
+        画像取得と検出処理のメインループ（非同期バージョン）
         
         Args:
             running_flag (threading.Event): 処理実行のフラグ
@@ -282,15 +298,6 @@ class DetectionProcessor:
             sys.path.insert(0, root_path)
             self.notify_status(f"パスを追加: {root_path}")
         
-        # デバイス状態監視スレッドの開始
-        self.device_monitor_flag.set()
-        self.device_monitor_thread = threading.Thread(
-            target=self.monitor_device_state,
-            args=(self.device_monitor_flag,)
-        )
-        self.device_monitor_thread.daemon = True
-        self.device_monitor_thread.start()
-        
         # 現在のデバイス状態
         current_connection_state = "Unknown"
         current_operation_state = "Unknown"
@@ -299,7 +306,7 @@ class DetectionProcessor:
             try:
                 # 最新のデバイス状態を取得
                 try:
-                    connection_state, operation_state = self.aitrios_client.get_connection_state()
+                    connection_state, operation_state = await self.aitrios_client.get_connection_state()
                     current_connection_state = connection_state
                     current_operation_state = operation_state
                     self.notify_status(f"デバイス状態: {connection_state} - {operation_state}")
@@ -311,7 +318,7 @@ class DetectionProcessor:
                     self.notify_status("推論結果ストリーミングモードで動作中")
                     
                     # 推論結果のみを取得
-                    inference_results = self.aitrios_client.get_inference_results(1)
+                    inference_results = await self.aitrios_client.get_inference_results(1)
                     
                     if isinstance(inference_results, list) and len(inference_results) > 0:
                         result = inference_results[0]
@@ -348,15 +355,15 @@ class DetectionProcessor:
                                     break  # 最初の推論結果のみを処理
                     
                     # 短い間隔で更新
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                     continue
                 
                 # 通常モードでの処理 (画像取得を含む)
                 # 画像ディレクトリの取得
-                directories = self.aitrios_client.get_image_directories()
+                directories = await self.aitrios_client.get_image_directories()
                 if not directories or not directories[0]['devices']:
                     self.notify_status("画像ディレクトリが見つかりません")
-                    time.sleep(5)
+                    await asyncio.sleep(5)
                     continue
 
                 # 最新の1つの画像サブディレクトリ名を取得
@@ -368,7 +375,7 @@ class DetectionProcessor:
                     
                     # 最新の画像を取得
                     self.notify_status(f"{subdir}から最新画像を取得中")
-                    image_data = self.aitrios_client.get_images(subdir)
+                    image_data = await self.aitrios_client.get_images(subdir)
                     
                     if not image_data or 'images' not in image_data or len(image_data['images']) == 0:
                         self.notify_status(f"サブディレクトリ {subdir} に画像が見つかりません")
@@ -383,7 +390,7 @@ class DetectionProcessor:
                     
                     # 推論結果を取得
                     self.notify_status("推論結果を取得中")
-                    inference_results = self.aitrios_client.get_inference_results(10)
+                    inference_results = await self.aitrios_client.get_inference_results(10)
                     
                     found_matching_inference = False
                     matching_inference = None
@@ -456,14 +463,43 @@ class DetectionProcessor:
                             self.notify_status(f"推論結果処理エラー: {str(e)}")
                 
                 # 処理間隔を設ける
-                time.sleep(5)
+                await asyncio.sleep(5)
                 
             except Exception as e:
                 self.notify_status(f"エラー: {str(e)}")
-                time.sleep(5)
+                await asyncio.sleep(5)
+    
+    # tkinterとasyncioの連携のためのヘルパーメソッド
+    def process_images(self, running_flag):
+        """
+        画像取得と検出処理のメインループ（同期ラッパー）
         
-        # 処理終了時にデバイス監視も終了
-        if self.device_monitor_flag.is_set():
-            self.device_monitor_flag.clear()
-            if self.device_monitor_thread and self.device_monitor_thread.is_alive():
-                self.device_monitor_thread.join(1.0)
+        Args:
+            running_flag (threading.Event): 処理実行のフラグ
+        """
+        # スレッド内で新しいイベントループを作成
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # デバイス状態監視スレッドの開始
+        self.device_monitor_flag.set()
+        self.device_monitor_thread = threading.Thread(
+            target=self.monitor_device_state,
+            args=(self.device_monitor_flag,)
+        )
+        self.device_monitor_thread.daemon = True
+        self.device_monitor_thread.start()
+        
+        # 非同期関数を実行
+        try:
+            loop.run_until_complete(self.process_images_async(running_flag))
+        except asyncio.CancelledError:
+            pass
+        finally:
+            loop.close()
+            
+            # 処理終了時にデバイス監視も終了
+            if self.device_monitor_flag.is_set():
+                self.device_monitor_flag.clear()
+                if self.device_monitor_thread and self.device_monitor_thread.is_alive():
+                    self.device_monitor_thread.join(1.0)

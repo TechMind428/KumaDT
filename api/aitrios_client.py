@@ -9,7 +9,9 @@ AITRIOSプラットフォームとの通信を担当するモジュール
 import time
 import requests
 import base64
+import aiohttp
 import settings
+import json
 
 # グローバル変数としてアクセストークンとその有効期限を保存
 ACCESS_TOKEN = None
@@ -36,7 +38,7 @@ class AITRIOSClient:
         self.client_id = client_id
         self.client_secret = client_secret
     
-    def get_access_token(self):
+    async def get_access_token(self):
         """
         APIアクセストークンを取得する
         
@@ -57,37 +59,43 @@ class AITRIOSClient:
                 "grant_type": "client_credentials",
                 "scope": "system"
             }
-            response = requests.post(PORTAL_URL, headers=headers, data=data)
-            if response.status_code == 200:
-                token_data = response.json()
-                ACCESS_TOKEN = token_data["access_token"]
-                # トークンの有効期限を設定（念のため10秒早めに期限切れとする）
-                TOKEN_EXPIRY = current_time + token_data.get("expires_in", 3600) - 10
-            else:
-                raise Exception(f"Failed to obtain access token: {response.text}")
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(PORTAL_URL, headers=headers, data=data) as response:
+                    if response.status == 200:
+                        token_data = await response.json()
+                        ACCESS_TOKEN = token_data["access_token"]
+                        # トークンの有効期限を設定（念のため10秒早めに期限切れとする）
+                        TOKEN_EXPIRY = current_time + token_data.get("expires_in", 3600) - 10
+                    else:
+                        response_text = await response.text()
+                        raise Exception(f"Failed to obtain access token: {response_text}")
         
         return ACCESS_TOKEN
     
-    def get_device_info(self):
+    async def get_device_info(self):
         """
         デバイスの情報を取得
         
         Returns:
             dict: デバイス情報
         """
+        token = await self.get_access_token()
         headers = {
-            "Authorization": f"Bearer {self.get_access_token()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         url = f"{BASE_URL}/devices/{self.device_id}"
-        response = requests.get(url, headers=headers)
         
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to get device info: {response.status_code} - {response.text}")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    response_text = await response.text()
+                    raise Exception(f"Failed to get device info: {response.status} - {response_text}")
     
-    def get_connection_state(self):
+    async def get_connection_state(self):
         """
         デバイスの接続状態を取得
         
@@ -97,7 +105,7 @@ class AITRIOSClient:
             動作状態: "Idle", "StreamingImage", "StreamingInferenceResult" または "StreamingBoth"
         """
         try:
-            device_info = self.get_device_info()
+            device_info = await self.get_device_info()
             
             # 接続状態の取得
             connection_state = device_info.get("connectionState", "Unknown")
@@ -112,24 +120,27 @@ class AITRIOSClient:
             print(f"Error getting connection state: {str(e)}")
             return "Unknown", "Unknown"
     
-    def get_image_directories(self):
+    async def get_image_directories(self):
         """
         デバイスの画像ディレクトリ一覧を取得
         
         Returns:
             dict: 画像ディレクトリ情報
         """
+        token = await self.get_access_token()
         headers = {
-            "Authorization": f"Bearer {self.get_access_token()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         url = f"{BASE_URL}/devices/images/directories"
         params = {"device_id": self.device_id}
-        response = requests.get(url, headers=headers, params=params)
-        print("response=", response.status_code)
-        return response.json()
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, params=params) as response:
+                print("response=", response.status)
+                return await response.json()
     
-    def get_images(self, sub_directory_name, file_name=None):
+    async def get_images(self, sub_directory_name, file_name=None):
         """
         指定したサブディレクトリから画像を取得
         
@@ -140,16 +151,19 @@ class AITRIOSClient:
         Returns:
             dict: 画像データを含むレスポンス
         """
+        token = await self.get_access_token()
         headers = {
-            "Authorization": f"Bearer {self.get_access_token()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         url = f"{BASE_URL}/devices/{self.device_id}/images/directories/{sub_directory_name}"
         params = {"order_by": "DESC", "number_of_images": 1}  # 最新の画像を1つだけ取得
-        response = requests.get(url, headers=headers, params=params)
-        return response.json()
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, params=params) as response:
+                return await response.json()
     
-    def get_inference_results(self, number_of_inference_results=5, filter=None):
+    async def get_inference_results(self, number_of_inference_results=5, filter=None):
         """
         デバイスの推論結果を取得
         
@@ -160,8 +174,9 @@ class AITRIOSClient:
         Returns:
             dict: 推論結果
         """
+        token = await self.get_access_token()
         headers = {
-            "Authorization": f"Bearer {self.get_access_token()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         url = f"{BASE_URL}/devices/{self.device_id}/inferenceresults"
@@ -173,69 +188,78 @@ class AITRIOSClient:
         if filter:
             params["filter"] = filter
         
-        response = requests.get(url, headers=headers, params=params)
-        return response.json()
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, params=params) as response:
+                return await response.json()
         
-    def start_inference(self):
+    async def start_inference(self):
         """
         デバイスの推論処理を開始する
         
         Returns:
             dict: APIレスポンス
         """
+        token = await self.get_access_token()
         headers = {
-            "Authorization": f"Bearer {self.get_access_token()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         url = f"{BASE_URL}/devices/{self.device_id}/inferenceresults/collectstart"
-        response = requests.post(url, headers=headers)
         
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to start inference: {response.status_code} - {response.text}")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    response_text = await response.text()
+                    raise Exception(f"Failed to start inference: {response.status} - {response_text}")
     
-    def stop_inference(self):
+    async def stop_inference(self):
         """
         デバイスの推論処理を停止する
         
         Returns:
             dict: APIレスポンス
         """
+        token = await self.get_access_token()
         headers = {
-            "Authorization": f"Bearer {self.get_access_token()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         url = f"{BASE_URL}/devices/{self.device_id}/inferenceresults/collectstop"
-        response = requests.post(url, headers=headers)
         
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Failed to stop inference: {response.status_code} - {response.text}")
-    # パラメーターファイル一覧を取得するメソッドを追加
-
-    def get_command_parameter_files(self):
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    response_text = await response.text()
+                    raise Exception(f"Failed to stop inference: {response.status} - {response_text}")
+    
+    # コマンドパラメーターファイル一覧を取得するメソッド
+    async def get_command_parameter_files(self):
         """
         Consoleに登録されているコマンドパラメーターファイル一覧を取得
         
         Returns:
             Dict[str, Any]: ファイル一覧とバインド情報
         """
+        token = await self.get_access_token()
         headers = {
-            "Authorization": f"Bearer {self.get_access_token()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
         url = f"{BASE_URL}/command_parameter_files"
         
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            response_text = response.text
-            raise Exception(f"Failed to get command parameter files: {response.status_code} - {response_text}")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    response_text = await response.text()
+                    raise Exception(f"Failed to get command parameter files: {response.status} - {response_text}")
     
-    def unbind_command_parameter_file(self, file_name, device_ids):
+    async def unbind_command_parameter_file(self, file_name, device_ids):
         """
         デバイスからコマンドパラメーターファイルをアンバインド
         
@@ -250,7 +274,7 @@ class AITRIOSClient:
             print(f"No device IDs provided for unbinding from {file_name}")
             return {"result": "SUCCESS", "message": "No devices to unbind"}
             
-        token = self.get_access_token()
+        token = await self.get_access_token()
         
         # 正しいエンドポイントとURLを使用
         url = f"{BASE_URL}/devices/configuration/command_parameter_files/{file_name}"
@@ -269,24 +293,25 @@ class AITRIOSClient:
         print(f"Unbinding command parameter file {file_name} from devices: {device_ids}")
         
         try:
-            # DELETEメソッドでJSONデータを送信
-            response = requests.delete(url, headers=headers, json=data)
-            
-            # 200または404なら成功 (404はファイルが存在しない場合)
-            if response.status_code == 200 or response.status_code == 404:
-                try:
-                    return response.json()
-                except:
-                    return {"result": "SUCCESS"}
-            else:
-                # エラーメッセージを記録するが例外は発生させない
-                print(f"Failed to unbind command parameter file: {response.status_code} - {response.text}")
-                return {"result": "ERROR", "message": f"Unbind failed: {response.text}"}
+            async with aiohttp.ClientSession() as session:
+                # DELETEメソッドでJSONデータを送信
+                async with session.delete(url, headers=headers, json=data) as response:
+                    # 200または404なら成功 (404はファイルが存在しない場合)
+                    if response.status == 200 or response.status == 404:
+                        try:
+                            return await response.json()
+                        except:
+                            return {"result": "SUCCESS"}
+                    else:
+                        # エラーメッセージを記録するが例外は発生させない
+                        response_text = await response.text()
+                        print(f"Failed to unbind command parameter file: {response.status} - {response_text}")
+                        return {"result": "ERROR", "message": f"Unbind failed: {response_text}"}
         except Exception as e:
             print(f"Exception in unbind_command_parameter_file: {str(e)}")
             return {"result": "ERROR", "message": f"Exception: {str(e)}"}
     
-    def update_command_parameter_file(self, file_name, comment, contents):
+    async def update_command_parameter_file(self, file_name, comment, contents):
         """
         既存のコマンドパラメーターファイルを更新
         
@@ -298,7 +323,7 @@ class AITRIOSClient:
         Returns:
             Dict[str, Any]: API応答
         """
-        token = self.get_access_token()
+        token = await self.get_access_token()
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
@@ -314,20 +339,21 @@ class AITRIOSClient:
         print(f"Updating command parameter file: {file_name}")
         print(f"Parameter length: {len(contents)}")
         
-        response = requests.patch(url, headers=headers, json=data)
-        response_text = response.text
-        print(f"Update response status: {response.status_code}, body: {response_text}")
-        
-        if response.status_code == 200:
-            try:
-                return json.loads(response_text)
-            except:
-                return {"result": "SUCCESS"}
-        else:
-            print(f"Failed to update command parameter file: {response.status_code} - {response_text}")
-            return {"result": "ERROR", "message": f"Update failed: {response_text}"}
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(url, headers=headers, json=data) as response:
+                response_text = await response.text()
+                print(f"Update response status: {response.status}, body: {response_text}")
+                
+                if response.status == 200:
+                    try:
+                        return json.loads(response_text)
+                    except:
+                        return {"result": "SUCCESS"}
+                else:
+                    print(f"Failed to update command parameter file: {response.status} - {response_text}")
+                    return {"result": "ERROR", "message": f"Update failed: {response_text}"}
     
-    def bind_command_parameter_file(self, file_name, device_ids):
+    async def bind_command_parameter_file(self, file_name, device_ids):
         """
         コマンドパラメーターファイルをデバイスにバインド
         
@@ -342,7 +368,7 @@ class AITRIOSClient:
             print(f"No device IDs provided for binding to {file_name}")
             return {"result": "SUCCESS", "message": "No devices to bind"}
             
-        token = self.get_access_token()
+        token = await self.get_access_token()
         
         # 正しいエンドポイントと形式
         url = f"{BASE_URL}/devices/configuration/command_parameter_files/{file_name}"
@@ -361,19 +387,20 @@ class AITRIOSClient:
         print(f"Binding command parameter file {file_name} to devices: {device_ids}")
         
         try:
-            # PUTメソッドでJSONデータを送信
-            response = requests.put(url, headers=headers, json=data)
-            response_text = response.text
-            print(f"Bind response status: {response.status_code}, body: {response_text}")
-            
-            if response.status_code == 200:
-                try:
-                    return json.loads(response_text)
-                except:
-                    return {"result": "SUCCESS"}
-            else:
-                print(f"Failed to bind command parameter file: {response.status_code} - {response_text}")
-                return {"result": "ERROR", "message": f"Bind failed: {response_text}"}
+            async with aiohttp.ClientSession() as session:
+                # PUTメソッドでJSONデータを送信
+                async with session.put(url, headers=headers, json=data) as response:
+                    response_text = await response.text()
+                    print(f"Bind response status: {response.status}, body: {response_text}")
+                    
+                    if response.status == 200:
+                        try:
+                            return json.loads(response_text)
+                        except:
+                            return {"result": "SUCCESS"}
+                    else:
+                        print(f"Failed to bind command parameter file: {response.status} - {response_text}")
+                        return {"result": "ERROR", "message": f"Bind failed: {response_text}"}
         except Exception as e:
             print(f"Exception in bind_command_parameter_file: {str(e)}")
             return {"result": "ERROR", "message": f"Exception: {str(e)}"}

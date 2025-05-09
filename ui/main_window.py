@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import time
+import asyncio
 from datetime import datetime
 
 import settings
@@ -20,6 +21,37 @@ from core.command_parameter_manager import CommandParameterManager
 from ui.main_tab import MainTab
 from ui.settings_tab import SettingsTab
 from ui.command_params_tab import CommandParamsTab
+
+class AsyncTkApp:
+    """tkinterとasyncioを連携するためのヘルパークラス"""
+    
+    def __init__(self, root):
+        self.root = root
+        self.running = True
+        self.loop = asyncio.new_event_loop()
+        self.loop_thread = threading.Thread(target=self._asyncio_thread, daemon=True)
+        self.loop_thread.start()
+    
+    def _asyncio_thread(self):
+        """asyncioイベントループを別スレッドで実行"""
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+    
+    def run_async(self, coro):
+        """非同期コルーチンを安全に実行"""
+        if not self.running:
+            return None
+        
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        return future
+    
+    def close(self):
+        """リソースのクリーンアップ"""
+        self.running = False
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.loop_thread.join(timeout=1.0)
+        if self.loop.is_running():
+            self.loop.close()
 
 class KumakitaApp(tk.Tk):
     """アプリケーションのメインウィンドウクラス"""
@@ -32,6 +64,9 @@ class KumakitaApp(tk.Tk):
         self.title("Kumakita - AI Detection Monitor")
         self.geometry("1200x700")  # ウィンドウサイズを大きめに設定
         self.configure(bg="#f0f0f0")  # Mac風の背景色
+        
+        # AsyncTkAppのインスタンスを作成
+        self.async_app = AsyncTkApp(self)
         
         # 設定マネージャーの初期化
         self.settings_manager = SettingsManager(settings)
@@ -64,10 +99,13 @@ class KumakitaApp(tk.Tk):
         self.init_ui()
         
         # アプリケーション起動時にデバイス状態を初期確認
-        self.check_device_status()
+        self.check_device_status_wrapper()
         
         # 定期的なデバイス状態の更新を開始
         self.start_periodic_status_update()
+        
+        # アプリケーション終了時の処理を設定
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
     
     def init_ui(self):
         """UIの初期化"""
@@ -100,8 +138,8 @@ class KumakitaApp(tk.Tk):
         self.main_tab.set_button_commands(
             start_command=self.start_processing,
             stop_command=self.stop_processing,
-            inference_start_command=self.start_inference,
-            inference_stop_command=self.stop_inference
+            inference_start_command=self.start_inference_wrapper,
+            inference_stop_command=self.stop_inference_wrapper
         )
         
         # 設定タブのUI
@@ -119,9 +157,6 @@ class KumakitaApp(tk.Tk):
         # ステータスバー
         self.status_bar = tk.Label(self, text="準備完了", bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        # アプリケーション終了時の処理を設定
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
     
     def on_tab_changed(self, event):
         """タブ切り替え時の処理"""
@@ -159,16 +194,16 @@ class KumakitaApp(tk.Tk):
     def periodic_status_update(self):
         """定期的なデバイス状態更新の実行"""
         # デバイス状態を確認
-        self.check_device_status()
+        self.check_device_status_wrapper()
         
         # 次の更新を予約（再帰的に呼び出し）
         self.status_update_timer = self.after(2000, self.periodic_status_update)
     
-    def check_device_status(self):
-        """アプリケーション起動時のデバイス状態確認"""
+    async def check_device_status(self):
+        """アプリケーション起動時のデバイス状態確認（非同期）"""
         try:
             # デバイス状態の取得
-            connection_state, operation_state = self.aitrios_client.get_connection_state()
+            connection_state, operation_state = await self.aitrios_client.get_connection_state()
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
             # UI更新
@@ -180,17 +215,30 @@ class KumakitaApp(tk.Tk):
             
         except Exception as e:
             self.update_status(f"デバイス状態取得エラー: {str(e)}")
-
-    def start_inference(self):
-        """推論処理を開始する"""
+    
+    def check_device_status_wrapper(self):
+        """デバイス状態確認の同期ラッパー"""
+        future = self.async_app.run_async(self.check_device_status())
+        if future:
+            future.add_done_callback(self._handle_async_errors)
+    
+    def _handle_async_errors(self, future):
+        """非同期関数の例外をキャッチして表示"""
+        try:
+            future.result()
+        except Exception as e:
+            self.update_status(f"非同期処理エラー: {str(e)}")
+    
+    async def start_inference(self):
+        """推論処理を開始する（非同期）"""
         try:
             # デバイス状態を取得
-            connection_state, operation_state = self.aitrios_client.get_connection_state()
+            connection_state, operation_state = await self.aitrios_client.get_connection_state()
             
             # Connected && Idleの場合のみ実行
             if connection_state == "Connected" and operation_state == "Idle":
                 # 推論開始APIを呼び出す
-                result = self.aitrios_client.start_inference()
+                result = await self.aitrios_client.start_inference()
                 if result.get("result") == "SUCCESS":
                     self.update_status("推論を開始しました")
                     
@@ -198,7 +246,7 @@ class KumakitaApp(tk.Tk):
                     self.start_processing()
                     
                     # 1秒後にデバイス状態を再取得（APIが非同期のため）
-                    self.after(1000, self.check_device_status)
+                    self.after(1000, self.check_device_status_wrapper)
                 else:
                     error_message = result.get("message", "Unknown error")
                     self.update_status(f"推論開始エラー: {error_message}")
@@ -207,21 +255,27 @@ class KumakitaApp(tk.Tk):
         except Exception as e:
             self.update_status(f"推論開始エラー: {str(e)}")
     
-    def stop_inference(self):
-        """推論処理を停止する"""
+    def start_inference_wrapper(self):
+        """推論開始の同期ラッパー"""
+        future = self.async_app.run_async(self.start_inference())
+        if future:
+            future.add_done_callback(self._handle_async_errors)
+    
+    async def stop_inference(self):
+        """推論処理を停止する（非同期）"""
         try:
             # デバイス状態を取得
-            connection_state, operation_state = self.aitrios_client.get_connection_state()
+            connection_state, operation_state = await self.aitrios_client.get_connection_state()
             
             # Connectedでかつ、Idle以外の場合に実行
             if connection_state == "Connected" and operation_state != "Idle":
                 # 推論停止APIを呼び出す
-                result = self.aitrios_client.stop_inference()
+                result = await self.aitrios_client.stop_inference()
                 if result.get("result") == "SUCCESS":
                     self.update_status("推論を停止しました")
                     
                     # 1秒後にデバイス状態を再取得（APIが非同期のため）
-                    self.after(1000, self.check_device_status)
+                    self.after(1000, self.check_device_status_wrapper)
                 else:
                     error_message = result.get("message", "Unknown error")
                     self.update_status(f"推論停止エラー: {error_message}")
@@ -229,6 +283,12 @@ class KumakitaApp(tk.Tk):
                 self.update_status(f"推論停止条件を満たしていません: {connection_state} - {operation_state}")
         except Exception as e:
             self.update_status(f"推論停止エラー: {str(e)}")
+    
+    def stop_inference_wrapper(self):
+        """推論停止の同期ラッパー"""
+        future = self.async_app.run_async(self.stop_inference())
+        if future:
+            future.add_done_callback(self._handle_async_errors)
     
     def on_settings_changed(self):
         """設定変更時のコールバック"""
@@ -250,7 +310,7 @@ class KumakitaApp(tk.Tk):
         self.update_status("設定が更新されました")
         
         # デバイス状態を再取得
-        self.check_device_status()
+        self.check_device_status_wrapper()
     
     def handle_processor_callback(self, event_type, data):
         """
@@ -325,6 +385,9 @@ class KumakitaApp(tk.Tk):
         
         # 定期的な状態更新を停止
         self.stop_periodic_status_update()
+        
+        # AsyncTkAppリソースをクリーンアップ
+        self.async_app.close()
         
         # 終了確認
         if messagebox.askokcancel("終了確認", "アプリケーションを終了しますか？"):
