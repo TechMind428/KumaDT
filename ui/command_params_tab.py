@@ -19,7 +19,7 @@ class CommandParamsTab:
     コマンドパラメータータブのUI実装
     """
     
-    def __init__(self, parent, command_param_manager, settings_manager):
+    def __init__(self, parent, command_param_manager, settings_manager, main_app=None):
         """
         コマンドパラメータータブの初期化
         
@@ -27,10 +27,12 @@ class CommandParamsTab:
             parent (tk.Frame): 親ウィジェット
             command_param_manager (CommandParameterManager): コマンドパラメーター管理オブジェクト
             settings_manager (SettingsManager): 設定管理オブジェクト
+            main_app (KumakitaApp, optional): メインアプリケーションへの参照
         """
         self.parent = parent
         self.command_param_manager = command_param_manager
         self.settings_manager = settings_manager
+        self.main_app = main_app  # メインアプリケーションへの参照を保持
         
         # UIの構築
         self.setup_ui()
@@ -176,7 +178,7 @@ class CommandParamsTab:
         self.num_images_var = IntVar(value=0)
         ttk.Entry(upload_params_grid, textvariable=self.num_images_var, width=10).grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
         
-        ttk.Label(upload_params_grid, text="アップロード間隔(秒):").grid(row=0, column=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(upload_params_grid, text="アップロード間隔(秒/30):").grid(row=0, column=2, sticky=tk.W, padx=5, pady=2)
         self.upload_interval_var = IntVar(value=60)
         ttk.Entry(upload_params_grid, textvariable=self.upload_interval_var, width=10).grid(row=0, column=3, sticky=tk.W, padx=5, pady=2)
         
@@ -231,9 +233,23 @@ class CommandParamsTab:
         self.scroll_frame.bind("<Configure>", self.on_frame_configure)
         self.canvas.bind("<Configure>", self.on_canvas_configure)
         
+        # マウスホイールイベントのバインド
+        self.canvas.bind("<MouseWheel>", self.on_mousewheel)  # Windows
+        self.canvas.bind("<Button-4>", self.on_mousewheel)  # Linux上スクロール
+        self.canvas.bind("<Button-5>", self.on_mousewheel)  # Linux下スクロール
+        
         # 初期UIの設定
         self.update_device_selector()
         self.disable_parameters_ui()
+    
+    def on_mousewheel(self, event):
+        """
+        マウスホイールイベントのハンドラ
+        """
+        if event.num == 4 or event.delta > 0:  # 上スクロール
+            self.canvas.yview_scroll(-1, "units")
+        elif event.num == 5 or event.delta < 0:  # 下スクロール
+            self.canvas.yview_scroll(1, "units")
     
     def on_frame_configure(self, event):
         """
@@ -671,7 +687,7 @@ class CommandParamsTab:
         
         # 確認ダイアログを表示
         if not messagebox.askyesno("確認", f"パラメーターをデバイス {device_id} に適用しますか？\n"
-                                  f"(これにより一時的に推論が中断される可能性があります)"):
+                                  f"(推論が中断されます)"):
             return
         
         # ステータス更新
@@ -703,12 +719,29 @@ class CommandParamsTab:
                         
                         # 成功メッセージを表示
                         self.params_result.configure(
-                            text=result["message"],
+                            text="コマンドパラメーターを正常に適用しました。監視画面で推論を再開させてください。",
                             foreground="green"
                         )
                         self.params_result.pack(fill=tk.X, padx=5, pady=5)
                         
-                        messagebox.showinfo("成功", result["message"])
+                        # 推論を停止する
+                        if self.main_app is not None and hasattr(self.main_app, 'stop_inference_wrapper'):
+                            self.main_app.stop_inference_wrapper()
+                            # デバイス状態を更新
+                            self.main_app.check_device_status_wrapper()
+                        else:
+                            # メインアプリへの参照がない場合は親ウィンドウから取得を試みる
+                            try:
+                                parent_window = self.parent.winfo_toplevel()
+                                if hasattr(parent_window, 'stop_inference_wrapper'):
+                                    parent_window.stop_inference_wrapper()
+                                    if hasattr(parent_window, 'check_device_status_wrapper'):
+                                        parent_window.check_device_status_wrapper()
+                            except Exception as e:
+                                print(f"推論停止中にエラーが発生: {str(e)}")
+                        
+                        messagebox.showinfo("成功", "コマンドパラメーターを正常に適用しました。監視画面で推論を再開させてください。")
+
                     else:
                         self.status_var.set(result["message"])
                         

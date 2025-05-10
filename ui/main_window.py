@@ -151,7 +151,8 @@ class KumakitaApp(tk.Tk):
         self.command_params_tab = CommandParamsTab(
             self.command_params_tab_frame,
             self.command_param_manager,
-            self.settings_manager
+            self.settings_manager,
+            main_app=self  # メインアプリケーションへの参照を渡す
         )
         
         # ステータスバー
@@ -232,6 +233,9 @@ class KumakitaApp(tk.Tk):
     async def start_inference(self):
         """推論処理を開始する（非同期）"""
         try:
+            # 推論開始ボタンを無効化
+            self.main_tab.inference_start_button.config(state=tk.DISABLED)
+            
             # デバイス状態を取得
             connection_state, operation_state = await self.aitrios_client.get_connection_state()
             
@@ -250,10 +254,16 @@ class KumakitaApp(tk.Tk):
                 else:
                     error_message = result.get("message", "Unknown error")
                     self.update_status(f"推論開始エラー: {error_message}")
+                    # エラー時は推論開始ボタンを再度有効化
+                    self.main_tab.inference_start_button.config(state=tk.NORMAL)
             else:
                 self.update_status(f"推論開始条件を満たしていません: {connection_state} - {operation_state}")
+                # 条件を満たさない場合も推論開始ボタンを再度有効化
+                self.main_tab.inference_start_button.config(state=tk.NORMAL)
         except Exception as e:
             self.update_status(f"推論開始エラー: {str(e)}")
+            # 例外発生時も推論開始ボタンを再度有効化
+            self.main_tab.inference_start_button.config(state=tk.NORMAL)
     
     def start_inference_wrapper(self):
         """推論開始の同期ラッパー"""
@@ -264,6 +274,9 @@ class KumakitaApp(tk.Tk):
     async def stop_inference(self):
         """推論処理を停止する（非同期）"""
         try:
+            # 推論停止ボタンを無効化
+            self.main_tab.inference_stop_button.config(state=tk.DISABLED)
+            
             # デバイス状態を取得
             connection_state, operation_state = await self.aitrios_client.get_connection_state()
             
@@ -279,10 +292,16 @@ class KumakitaApp(tk.Tk):
                 else:
                     error_message = result.get("message", "Unknown error")
                     self.update_status(f"推論停止エラー: {error_message}")
+                    # エラー時は推論停止ボタンを再度有効化
+                    self.main_tab.inference_stop_button.config(state=tk.NORMAL)
             else:
                 self.update_status(f"推論停止条件を満たしていません: {connection_state} - {operation_state}")
+                # 条件を満たさない場合も推論停止ボタンを再度有効化
+                self.main_tab.inference_stop_button.config(state=tk.NORMAL)
         except Exception as e:
             self.update_status(f"推論停止エラー: {str(e)}")
+            # 例外発生時も推論停止ボタンを再度有効化
+            self.main_tab.inference_stop_button.config(state=tk.NORMAL)
     
     def stop_inference_wrapper(self):
         """推論停止の同期ラッパー"""
