@@ -10,8 +10,9 @@ KumaDTは、AITRIOSデバイスの監視と管理のためのデスクトップ�
 - コマンドパラメーター設定
 
 ## インストール
-```
+
 Mac / Raspberry Piの場合
+```
 git clone https://github.com/TechMind428/KumaDT.git
 cd KumaDT
 python3 -m venv myenv
