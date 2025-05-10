@@ -198,7 +198,7 @@ class MainTab:
             connection_state (str): デバイス接続状態
             operation_state (str): デバイス動作状態
         """
-        # 接続状態がConnectedの場合のみ有効
+        # 接続状態がConnectedの場合のみ有効化を検討
         if connection_state == "Connected":
             if operation_state == "Idle":
                 # アイドル状態なら推論開始ボタンを有効
@@ -212,7 +212,7 @@ class MainTab:
             # 未接続の場合は両方無効
             self.inference_start_button.config(state=tk.DISABLED)
             self.inference_stop_button.config(state=tk.DISABLED)
-    
+                
     def update_log(self, message):
         """
         ログテキストを更新
@@ -310,3 +310,24 @@ class MainTab:
             # すべての検出情報を表示
             for i, detection in enumerate(detections, 1):
                 self.detection_listbox.insert(tk.END, f"{i}. {detection}")
+
+    def update_device_state_ui(self, connection_state, operation_state, timestamp):
+        """
+        デバイス状態表示を更新（ボタン状態の更新なし）
+        
+        Args:
+            connection_state (str): 接続状態
+            operation_state (str): 動作状態
+            timestamp (str): 更新時刻
+        """
+        self.connection_state_var.set(connection_state)
+        self.operation_state_var.set(operation_state)
+        self.last_updated_var.set(timestamp)
+        
+        # 接続状態に応じたラベルの色設定
+        if connection_state == "Connected":
+            self.connection_state_label.config(foreground="green")
+        elif connection_state == "Disconnected":
+            self.connection_state_label.config(foreground="red")
+        else:
+            self.connection_state_label.config(foreground="orange")

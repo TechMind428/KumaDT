@@ -95,6 +95,14 @@ class KumakitaApp(tk.Tk):
         # 状態更新タイマーID
         self.status_update_timer = None
         
+        # 推論開始・停止操作の進行中フラグ
+        self.inference_start_in_progress = False
+        self.inference_stop_in_progress = False
+        
+        # 推論開始・停止操作のタイムアウトタイマーID
+        self.inference_start_timeout_timer = None
+        self.inference_stop_timeout_timer = None
+        
         # UIの初期化
         self.init_ui()
         
@@ -207,15 +215,92 @@ class KumakitaApp(tk.Tk):
             connection_state, operation_state = await self.aitrios_client.get_connection_state()
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
-            # UI更新
-            self.main_tab.update_device_state(connection_state, operation_state, timestamp)
+            # UI更新 - 進行中フラグを考慮してボタン状態を決定
+            self.update_inference_buttons(connection_state, operation_state)
+            
+            # デバイス状態の更新（ボタン以外）
+            self.main_tab.update_device_state_ui(connection_state, operation_state, timestamp)
             
             # ステータス更新
             status_message = "デバイス接続中" if connection_state == "Connected" else "デバイス未接続"
             self.update_status(f"{status_message} ({operation_state})")
             
+            # 推論状態の変化を検出して進行中フラグを解除
+            self.check_inference_state_change(operation_state)
+            
         except Exception as e:
             self.update_status(f"デバイス状態取得エラー: {str(e)}")
+    
+    def update_inference_buttons(self, connection_state, operation_state):
+        """
+        推論ボタン状態を更新 - 進行中フラグを考慮
+        
+        Args:
+            connection_state (str): デバイス接続状態
+            operation_state (str): デバイス動作状態
+        """
+        # 接続状態がConnectedの場合のみボタンを有効化検討
+        if connection_state == "Connected":
+            if self.inference_start_in_progress:
+                # 推論開始処理中は開始ボタンを無効化
+                self.main_tab.inference_start_button.config(state=tk.DISABLED)
+            else:
+                # 推論開始処理中でなければ、Idle状態の場合のみ開始ボタンを有効化
+                if operation_state == "Idle":
+                    self.main_tab.inference_start_button.config(state=tk.NORMAL)
+                else:
+                    self.main_tab.inference_start_button.config(state=tk.DISABLED)
+            
+            if self.inference_stop_in_progress:
+                # 推論停止処理中は停止ボタンを無効化
+                self.main_tab.inference_stop_button.config(state=tk.DISABLED)
+            else:
+                # 推論停止処理中でなければ、Idle以外の状態の場合のみ停止ボタンを有効化
+                if operation_state != "Idle":
+                    self.main_tab.inference_stop_button.config(state=tk.NORMAL)
+                else:
+                    self.main_tab.inference_stop_button.config(state=tk.DISABLED)
+        else:
+            # 未接続の場合は両方無効
+            self.main_tab.inference_start_button.config(state=tk.DISABLED)
+            self.main_tab.inference_stop_button.config(state=tk.DISABLED)
+    
+    def check_inference_state_change(self, operation_state):
+        """
+        推論状態の変化を監視して進行中フラグを解除
+        
+        Args:
+            operation_state (str): デバイス動作状態
+        """
+        # 推論開始中で、Idle以外の状態になった場合は開始完了と判断
+        if self.inference_start_in_progress and operation_state != "Idle":
+            self.inference_start_in_progress = False
+            if self.inference_start_timeout_timer:
+                self.after_cancel(self.inference_start_timeout_timer)
+                self.inference_start_timeout_timer = None
+            
+            # 推論開始完了時に確実に監視処理を開始
+            self.update_status("推論が開始されました")
+            if not self.running_flag.is_set():
+                self.update_status("監視処理も自動的に開始します")
+                self.start_processing()
+                # 監視ボタンの状態を更新
+                self.main_tab.set_start_state(True)
+        
+        # 推論停止中で、Idle状態になった場合は停止完了と判断
+        if self.inference_stop_in_progress and operation_state == "Idle":
+            self.inference_stop_in_progress = False
+            if self.inference_stop_timeout_timer:
+                self.after_cancel(self.inference_stop_timeout_timer)
+                self.inference_stop_timeout_timer = None
+            
+            # 推論停止完了時に確実に監視処理も停止
+            self.update_status("推論が停止されました")
+            if self.running_flag.is_set():
+                self.update_status("監視処理も自動的に停止します")
+                self.stop_processing()
+                # 監視ボタンの状態を更新
+                self.main_tab.set_start_state(False)
     
     def check_device_status_wrapper(self):
         """デバイス状態確認の同期ラッパー"""
@@ -230,11 +315,31 @@ class KumakitaApp(tk.Tk):
         except Exception as e:
             self.update_status(f"非同期処理エラー: {str(e)}")
     
+    def reset_inference_start_flag(self):
+        """安全装置: 推論開始フラグを強制リセット"""
+        self.inference_start_in_progress = False
+        self.inference_start_timeout_timer = None
+        self.check_device_status_wrapper()  # 状態を再確認して更新
+        self.update_status("推論開始タイムアウト: 状態を更新しました")
+    
+    def reset_inference_stop_flag(self):
+        """安全装置: 推論停止フラグを強制リセット"""
+        self.inference_stop_in_progress = False
+        self.inference_stop_timeout_timer = None
+        self.check_device_status_wrapper()  # 状態を再確認して更新
+        self.update_status("推論停止タイムアウト: 状態を更新しました")
+    
     async def start_inference(self):
         """推論処理を開始する（非同期）"""
         try:
+            # 推論開始進行中フラグを設定
+            self.inference_start_in_progress = True
+            
             # 推論開始ボタンを無効化
             self.main_tab.inference_start_button.config(state=tk.DISABLED)
+            
+            # 安全装置: 10秒後にフラグをリセット（状態変化が検出されない場合のため）
+            self.inference_start_timeout_timer = self.after(10000, self.reset_inference_start_flag)
             
             # デバイス状態を取得
             connection_state, operation_state = await self.aitrios_client.get_connection_state()
@@ -244,26 +349,46 @@ class KumakitaApp(tk.Tk):
                 # 推論開始APIを呼び出す
                 result = await self.aitrios_client.start_inference()
                 if result.get("result") == "SUCCESS":
-                    self.update_status("推論を開始しました")
+                    self.update_status("推論開始APIを呼び出しました - 開始を待機中")
                     
-                    # 自動的に表示も開始
-                    self.start_processing()
+                    # 注：監視の自動開始はcheck_inference_state_changeメソッドで行うため、ここでは削除
                     
                     # 1秒後にデバイス状態を再取得（APIが非同期のため）
                     self.after(1000, self.check_device_status_wrapper)
                 else:
                     error_message = result.get("message", "Unknown error")
                     self.update_status(f"推論開始エラー: {error_message}")
-                    # エラー時は推論開始ボタンを再度有効化
-                    self.main_tab.inference_start_button.config(state=tk.NORMAL)
+                    
+                    # エラー時はフラグをクリア
+                    self.inference_start_in_progress = False
+                    if self.inference_start_timeout_timer:
+                        self.after_cancel(self.inference_start_timeout_timer)
+                        self.inference_start_timeout_timer = None
+                    
+                    # 状態を再確認
+                    self.after(1000, self.check_device_status_wrapper)
             else:
                 self.update_status(f"推論開始条件を満たしていません: {connection_state} - {operation_state}")
-                # 条件を満たさない場合も推論開始ボタンを再度有効化
-                self.main_tab.inference_start_button.config(state=tk.NORMAL)
+                
+                # 条件を満たさない場合はフラグをクリア
+                self.inference_start_in_progress = False
+                if self.inference_start_timeout_timer:
+                    self.after_cancel(self.inference_start_timeout_timer)
+                    self.inference_start_timeout_timer = None
+                
+                # 状態を再確認
+                self.after(1000, self.check_device_status_wrapper)
         except Exception as e:
             self.update_status(f"推論開始エラー: {str(e)}")
-            # 例外発生時も推論開始ボタンを再度有効化
-            self.main_tab.inference_start_button.config(state=tk.NORMAL)
+            
+            # 例外発生時もフラグをクリア
+            self.inference_start_in_progress = False
+            if self.inference_start_timeout_timer:
+                self.after_cancel(self.inference_start_timeout_timer)
+                self.inference_start_timeout_timer = None
+            
+            # 状態を再確認
+            self.after(1000, self.check_device_status_wrapper)
     
     def start_inference_wrapper(self):
         """推論開始の同期ラッパー"""
@@ -274,8 +399,14 @@ class KumakitaApp(tk.Tk):
     async def stop_inference(self):
         """推論処理を停止する（非同期）"""
         try:
+            # 推論停止進行中フラグを設定
+            self.inference_stop_in_progress = True
+            
             # 推論停止ボタンを無効化
             self.main_tab.inference_stop_button.config(state=tk.DISABLED)
+            
+            # 安全装置: 10秒後にフラグをリセット（状態変化が検出されない場合のため）
+            self.inference_stop_timeout_timer = self.after(10000, self.reset_inference_stop_flag)
             
             # デバイス状態を取得
             connection_state, operation_state = await self.aitrios_client.get_connection_state()
@@ -285,23 +416,44 @@ class KumakitaApp(tk.Tk):
                 # 推論停止APIを呼び出す
                 result = await self.aitrios_client.stop_inference()
                 if result.get("result") == "SUCCESS":
-                    self.update_status("推論を停止しました")
+                    self.update_status("推論停止APIを呼び出しました - 停止を待機中")
                     
                     # 1秒後にデバイス状態を再取得（APIが非同期のため）
                     self.after(1000, self.check_device_status_wrapper)
                 else:
                     error_message = result.get("message", "Unknown error")
                     self.update_status(f"推論停止エラー: {error_message}")
-                    # エラー時は推論停止ボタンを再度有効化
-                    self.main_tab.inference_stop_button.config(state=tk.NORMAL)
+                    
+                    # エラー時はフラグをクリア
+                    self.inference_stop_in_progress = False
+                    if self.inference_stop_timeout_timer:
+                        self.after_cancel(self.inference_stop_timeout_timer)
+                        self.inference_stop_timeout_timer = None
+                    
+                    # 状態を再確認
+                    self.after(1000, self.check_device_status_wrapper)
             else:
                 self.update_status(f"推論停止条件を満たしていません: {connection_state} - {operation_state}")
-                # 条件を満たさない場合も推論停止ボタンを再度有効化
-                self.main_tab.inference_stop_button.config(state=tk.NORMAL)
+                
+                # 条件を満たさない場合はフラグをクリア
+                self.inference_stop_in_progress = False
+                if self.inference_stop_timeout_timer:
+                    self.after_cancel(self.inference_stop_timeout_timer)
+                    self.inference_stop_timeout_timer = None
+                
+                # 状態を再確認
+                self.after(1000, self.check_device_status_wrapper)
         except Exception as e:
             self.update_status(f"推論停止エラー: {str(e)}")
-            # 例外発生時も推論停止ボタンを再度有効化
-            self.main_tab.inference_stop_button.config(state=tk.NORMAL)
+            
+            # 例外発生時もフラグをクリア
+            self.inference_stop_in_progress = False
+            if self.inference_stop_timeout_timer:
+                self.after_cancel(self.inference_stop_timeout_timer)
+                self.inference_stop_timeout_timer = None
+            
+            # 状態を再確認
+            self.after(1000, self.check_device_status_wrapper)
     
     def stop_inference_wrapper(self):
         """推論停止の同期ラッパー"""
@@ -347,7 +499,15 @@ class KumakitaApp(tk.Tk):
             self.main_tab.update_detection_info(data)
         elif event_type == "device_state":
             connection_state, operation_state, timestamp = data
-            self.main_tab.update_device_state(connection_state, operation_state, timestamp)
+            
+            # デバイス状態の更新 - ボタン状態も含む
+            self.update_inference_buttons(connection_state, operation_state)
+            
+            # デバイス状態の更新（ボタン以外）
+            self.main_tab.update_device_state_ui(connection_state, operation_state, timestamp)
+            
+            # 推論状態の変化を検出して進行中フラグを解除
+            self.check_inference_state_change(operation_state)
     
     def update_status(self, message):
         """
@@ -404,6 +564,12 @@ class KumakitaApp(tk.Tk):
         
         # 定期的な状態更新を停止
         self.stop_periodic_status_update()
+        
+        # タイマーをキャンセル
+        if self.inference_start_timeout_timer:
+            self.after_cancel(self.inference_start_timeout_timer)
+        if self.inference_stop_timeout_timer:
+            self.after_cancel(self.inference_stop_timeout_timer)
         
         # AsyncTkAppリソースをクリーンアップ
         self.async_app.close()
