@@ -10,20 +10,21 @@ KumaDTは、AITRIOSデバイスの監視と管理のためのデスクトップ�
 - コマンドパラメーター設定
 
 ## インストール
-```
+
 Mac / Raspberry Piの場合
+```
 git clone https://github.com/TechMind428/KumaDT.git
 cd KumaDT
-python3 -m venv myenv
-. myenv/bin/activate
+python3 -m venv myenv #Pythonの仮想環境の作成
+. myenv/bin/activate #Pythonの仮想環境をActivate
 ```
 Windowsの場合
 ```
 Mac / Raspberry Piの場合
 git clone https://github.com/TechMind428/KumaDT.git
-cd KumaDesktop
-python3 -m venv myenv
-myenv/Scripts/activate
+cd KumaDT
+python3 -m venv myenvn #Pythonの仮想環境の作成
+myenv/Scripts/activate #Pythonの仮想環境をActivate
 ```
 
 ### 前提条件
@@ -49,7 +50,7 @@ pip install -r requirements.txt
 
 ## 使用方法
 
-以下のコマンドでアプリケーションを起動します：
+Pythonの仮想環境がactiveな状態で、以下のコマンドでアプリケーションを起動します：
 
 ```bash
 python main.py
