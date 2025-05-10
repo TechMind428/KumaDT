@@ -1,6 +1,7 @@
 # KumaDesktop
 
 KumaDesktopは、AITRIOSデバイスの監視と管理のためのデスクトップアプリケーションで、Object Detectionの推論結果の表示に焦点を当てています。
+このプログラムでは、デバイスにBindされているコマンドパラメーターファイルを変更して適用することができますので、同じパラメーターファイル名をバインドしている他のデバイスにも影響を与えますので、操作するデバイス専用のコマンドパラメーターをあらかじめBindしておくようにしてください。
 
 ## 機能
 
@@ -9,9 +10,25 @@ KumaDesktopは、AITRIOSデバイスの監視と管理のためのデスクト�
 - コマンドパラメーター設定
 
 ## インストール
+```
+Mac / Raspberry Piの場合
+git clone https://github.com/TechMind428/KumaDT.git
+cd KumaDT
+python3 -m venv myenv
+. myenv/bin/activate
+```
+Windowsの場合
+```
+Mac / Raspberry Piの場合
+git clone https://github.com/TechMind428/KumaDT.git
+cd KumaDesktop
+python3 -m venv myenv
+myenv/Scripts/activate
+```
 
 ### 前提条件
 
+-MacOS, Windows11, Raspberry Pi OS
 - Python 3.8以上
 - AITRIOSコンソールアカウントとAPI認証情報
 
@@ -25,7 +42,7 @@ pip install -r requirements.txt
 
 ### 設定
 
-1. `settings.py`ファイルをあなたのAITRIOSデバイス情報で修正します：
+1. `settings.py`ファイルをあなたのAITRIOSデバイス情報で修正します：(プログラムを起動して設定画面からでも設定できます）
    - `DEVICE_ID`: あなたのAITRIOSデバイスID
    - `CLIENT_ID`: あなたのAITRIOS APIクライアントID
    - `CLIENT_SECRET`: あなたのAITRIOS APIクライアントシークレット
